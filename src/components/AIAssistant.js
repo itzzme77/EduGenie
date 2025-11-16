@@ -83,20 +83,140 @@ export default function AIAssistant() {
   };
 
   const quickActions = [
-    { icon: '', text: 'Recommend courses for me', action: 'recommend' },
-    { icon: '', text: 'Study tips', action: 'tips' },
-    { icon: '', text: 'Career guidance', action: 'career' },
-    { icon: '', text: 'Learning roadmap', action: 'roadmap' }
+    { icon: '📚', text: 'Recommend courses for me', action: 'recommend' },
+    { icon: '💡', text: 'Study tips', action: 'tips' },
+    { icon: '🎯', text: 'Career guidance', action: 'career' },
+    { icon: '🗺️', text: 'Learning roadmap', action: 'roadmap' }
   ];
 
-  const handleQuickAction = (action) => {
-    const actionTexts = {
-      recommend: 'Can you recommend some courses for me?',
-      tips: 'What are some effective study tips?',
-      career: 'I need career guidance',
-      roadmap: 'Create a learning roadmap for me'
+  const handleQuickAction = async (action) => {
+    const actionPrompts = {
+      recommend: `I'd like personalized course recommendations. Please suggest 5 high-quality courses across different learning platforms (like Udemy, Coursera, edX) based on popular and in-demand skills. For each course, include:
+- Course name
+- Platform
+- Brief description
+- Difficulty level
+- Why it's valuable
+
+Focus on skills like programming, data science, web development, AI/ML, business, or design.`,
+      
+      tips: `Please provide comprehensive study tips for effective learning. Include:
+
+1. **Time Management Techniques**
+   - Best practices for scheduling study sessions
+   - Pomodoro technique and other methods
+
+2. **Active Learning Strategies**
+   - Note-taking methods (Cornell, mind mapping)
+   - Spaced repetition and retrieval practice
+
+3. **Focus and Productivity**
+   - Minimizing distractions
+   - Creating an optimal study environment
+
+4. **Memory Retention**
+   - Techniques for long-term retention
+   - Using mnemonics and visualization
+
+5. **Exam Preparation**
+   - Strategic revision methods
+   - Stress management tips
+
+Make it practical and actionable!`,
+      
+      career: `I need comprehensive career guidance. Please help me with:
+
+1. **Career Exploration**
+   - Overview of trending career paths in 2025
+   - Skills most valued by employers
+   - Emerging industries and opportunities
+
+2. **Career Planning**
+   - Steps to identify the right career path
+   - How to transition between careers
+   - Building a competitive skill set
+
+3. **Job Market Insights**
+   - In-demand roles and technologies
+   - Remote work opportunities
+   - Freelancing vs traditional employment
+
+4. **Professional Development**
+   - Networking strategies
+   - Building a personal brand
+   - Continuous learning importance
+
+5. **Salary Expectations**
+   - Industry salary ranges
+   - Negotiation tips
+
+Provide specific, actionable advice tailored to modern career landscapes.`,
+      
+      roadmap: `Create a detailed, personalized learning roadmap for me. First, ask me:
+1. What field/technology am I interested in learning?
+2. What's my current skill level (beginner/intermediate/advanced)?
+3. What are my learning goals (job change, skill upgrade, hobby)?
+4. How much time can I dedicate per week?
+
+Then create a structured roadmap with:
+- **Phase 1: Foundations** (Beginner level)
+- **Phase 2: Core Concepts** (Intermediate level)
+- **Phase 3: Advanced Topics** (Expert level)
+- **Phase 4: Projects & Practice**
+- **Timeline estimates** for each phase
+- **Resources** (courses, books, practice platforms)
+- **Milestones** to track progress
+
+Let's start by gathering information about your learning goals!`
     };
-    setInputMessage(actionTexts[action]);
+
+    // Create user message
+    const userMessage = {
+      id: messages.length + 1,
+      type: 'user',
+      text: actionPrompts[action],
+      timestamp: new Date()
+    };
+
+    const updatedMessages = [...messages, userMessage];
+    setMessages(updatedMessages);
+    setIsTyping(true);
+    setError(null);
+
+    try {
+      const conversationHistory = updatedMessages.slice(1).map(msg => ({
+        role: msg.type === 'user' ? 'user' : 'model',
+        text: msg.text
+      }));
+
+      console.log('Sending quick action to Gemini:', action);
+      const aiResponse = await sendMessageToGemini(actionPrompts[action], conversationHistory);
+      console.log('Received response from Gemini:', aiResponse);
+      
+      const botMessage = {
+        id: updatedMessages.length + 1,
+        type: 'bot',
+        text: aiResponse,
+        timestamp: new Date()
+      };
+
+      setMessages([...updatedMessages, botMessage]);
+    } catch (error) {
+      console.error('Error getting AI response:', error);
+      const errorMsg = error.message || 'Unknown error occurred';
+      setError('Failed to get response: ' + errorMsg);
+      
+      const errorMessage = {
+        id: updatedMessages.length + 1,
+        type: 'bot',
+        text: 'I apologize, but I encountered an error: ' + errorMsg + '. Please try again in a moment.',
+        timestamp: new Date()
+      };
+      
+      setMessages([...updatedMessages, errorMessage]);
+    } finally {
+      setIsTyping(false);
+    }
   };
 
   const checkAvailableModels = async () => {
@@ -113,10 +233,10 @@ export default function AIAssistant() {
   };
 
   return (
-    <div className="ai-assistant">
+    <div className="ai-assistant-container">
       <div className="ai-header">
         <div className="ai-header-content">
-          <h2 className="ai-title">AI Learning Assistant</h2>
+          <h2 className="ai-title">🤖 AI Learning Assistant</h2>
           <p>Powered by Google Gemini</p>
         </div>
         <div className="ai-controls">
@@ -125,7 +245,7 @@ export default function AIAssistant() {
         </div>
       </div>
 
-      {error && (<div className="error-banner"><span></span>{error}</div>)}
+      {error && (<div className="error-banner"><span>⚠️</span>{error}</div>)}
 
       <div className="quick-actions">
         <p className="quick-actions-label">Quick Actions:</p>
@@ -143,7 +263,7 @@ export default function AIAssistant() {
         <div className="messages-area">
           {messages.map((message) => (
             <div key={message.id} className={'message ' + message.type}>
-              <div className="message-avatar">{message.type === 'bot' ? '' : ''}</div>
+              <div className="message-avatar">{message.type === 'bot' ? '🤖' : '👤'}</div>
               <div className="message-content">
                 <div className="message-text">{message.text}</div>
                 <div className="message-time">{message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
@@ -153,7 +273,7 @@ export default function AIAssistant() {
           
           {isTyping && (
             <div className="message bot">
-              <div className="message-avatar"></div>
+              <div className="message-avatar">🤖</div>
               <div className="message-content">
                 <div className="typing-indicator"><span></span><span></span><span></span></div>
               </div>
@@ -163,7 +283,7 @@ export default function AIAssistant() {
 
         <form onSubmit={handleSendMessage} className="chat-input-form">
           <input type="text" value={inputMessage} onChange={(e) => setInputMessage(e.target.value)} placeholder="Ask me anything about learning..." className="chat-input" />
-          <button type="submit" className="send-button" disabled={!inputMessage.trim()}></button>
+          <button type="submit" className="send-button" disabled={!inputMessage.trim()}>📤</button>
         </form>
       </div>
 

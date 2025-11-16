@@ -7,44 +7,104 @@ export default function LearningRoadmap({ searchHistory = [] }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [selectedTopic, setSelectedTopic] = useState('');
+  const [cache, setCache] = useState({}); // cache per topic to avoid redundant API calls
 
   // Get unique search topics from history
   const uniqueTopics = [...new Set(searchHistory.filter(term => term && term.trim()))];
 
   useEffect(() => {
     // Auto-generate roadmap if there are search topics
-    if (uniqueTopics.length > 0 && !selectedTopic) {
-      setSelectedTopic(uniqueTopics[0]);
-      generateRoadmap(uniqueTopics[0]);
+    if (uniqueTopics.length > 0 && !selectedTopic && !roadmap) {
+      const firstTopic = uniqueTopics[0];
+      setSelectedTopic(firstTopic);
+      generateRoadmap(firstTopic);
     }
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uniqueTopics]);
+
+  const parseRoadmapContent = (content) => {
+    if (!content || typeof content !== 'string') return [];
+    const sections = [];
+    let currentSection = null;
+    const lines = content.split(/\r?\n/);
+
+    lines.forEach(rawLine => {
+      const line = rawLine.trim();
+      if (!line) return;
+      // Match headers: numbered, markdown (#), or bold **Title** style
+      const headerMatch = line.match(/^(#{1,3}\s.*|\d+\.\s.*|\*\*(.+?)\*\*\s*.*)$/);
+      if (headerMatch) {
+        if (currentSection) sections.push(currentSection);
+        // Extract title removing leading markers and surrounding **
+        let title = line
+          .replace(/^#{1,3}\s*/, '')
+          .replace(/^\d+\.\s*/, '')
+          .replace(/^\*\*(.+?)\*\*\s*/, '$1')
+          .trim();
+        const icon = getSectionIcon(title);
+        currentSection = { title, icon, items: [] };
+        return;
+      }
+      // Bullet items
+      if (line.match(/^[-•*]\s+/) && currentSection) {
+        currentSection.items.push(line.replace(/^[-•*]\s+/, '').trim());
+        return;
+      }
+      // Paragraph fallback
+      if (currentSection) {
+        currentSection.items.push(line);
+      }
+    });
+
+    if (currentSection) sections.push(currentSection);
+    return sections;
+  };
+
+  const getSectionIcon = (title) => {
+    const lower = title.toLowerCase();
+    if (lower.includes('beginner') || lower.includes('fundamentals') || lower.includes('basics')) return '🌱';
+    if (lower.includes('intermediate') || lower.includes('core')) return '🚀';
+    if (lower.includes('advanced') || lower.includes('expert') || lower.includes('master')) return '⭐';
+    if (lower.includes('project')) return '💼';
+    if (lower.includes('timeline') || lower.includes('duration')) return '⏱️';
+    if (lower.includes('skill') || lower.includes('tool')) return '🛠️';
+    if (lower.includes('resource') || lower.includes('learning')) return '📚';
+    return '📌';
+  };
 
   const generateRoadmap = async (topic) => {
     if (!topic || !topic.trim()) return;
+    const key = topic.trim().toLowerCase();
+
+    // Serve from cache if exists
+    if (cache[key]) {
+      setRoadmap(cache[key]);
+      return;
+    }
 
     setLoading(true);
     setError(null);
-    
     try {
-      const prompt = `Create a comprehensive learning roadmap for "${topic}". 
-
-Structure the roadmap as follows:
-1. Beginner Level (2-3 topics with brief descriptions)
-2. Intermediate Level (2-3 topics with brief descriptions)
-3. Advanced Level (2-3 topics with brief descriptions)
-4. Recommended Projects (2-3 project ideas)
-5. Estimated Timeline
-6. Key Skills to Master
-
-Keep each section concise but informative. Use bullet points and clear formatting.`;
+      const prompt = `Generate a concise structured learning roadmap for: ${topic}. Use ONLY these sections with bold headers and bullet points:
+**Beginner Level** – 3 bullets
+**Intermediate Level** – 3 bullets
+**Advanced Level** – 3 bullets
+**Recommended Projects** – 3 bullets (Project Name: brief)
+**Estimated Timeline** – Beginner / Intermediate / Advanced durations
+**Key Skills to Master** – 3–5 bullets
+Keep each bullet under 18 words, actionable, specific. Avoid filler, avoid repeating section titles inside bullets.`;
 
       const response = await sendMessageToGemini(prompt, []);
-      
-      setRoadmap({
-        topic: topic,
+      const parsedSections = parseRoadmapContent(response);
+
+      const roadmapObj = {
+        topic,
         content: response,
+        sections: parsedSections,
         generatedAt: new Date()
-      });
+      };
+      setRoadmap(roadmapObj);
+      setCache(prev => ({ ...prev, [key]: roadmapObj }));
     } catch (err) {
       setError(err.message || 'Failed to generate roadmap');
       console.error('Roadmap generation error:', err);
@@ -126,23 +186,35 @@ Keep each section concise but informative. Use bullet points and clear formattin
           </div>
           
           <div className="roadmap-body">
-            <div className="roadmap-text">
-              {roadmap.content.split('\n').map((line, index) => {
-                if (line.trim() === '') return <br key={index} />;
-                
-                // Headers (lines with numbers or special chars)
-                if (line.match(/^#{1,3}\s/) || line.match(/^\d+\./)) {
-                  return <h4 key={index} className="roadmap-section-title">{line.replace(/^#{1,3}\s/, '').replace(/^\d+\.\s/, '')}</h4>;
-                }
-                
-                // Bullet points
-                if (line.trim().startsWith('-') || line.trim().startsWith('•')) {
-                  return <li key={index} className="roadmap-item">{line.replace(/^[-•]\s/, '')}</li>;
-                }
-                
-                // Regular text
-                return <p key={index} className="roadmap-paragraph">{line}</p>;
-              })}
+            <div className="roadmap-timeline">
+              {roadmap.sections && roadmap.sections.length > 0 ? roadmap.sections.map((section, sectionIndex) => (
+                <div key={sectionIndex} className="roadmap-section">
+                  <div className="section-header">
+                    <div className="section-icon">{section.icon}</div>
+                    <h4 className="section-title">{section.title}</h4>
+                  </div>
+                  <div className="section-content">
+                    {section.items.map((item, itemIndex) => (
+                      <div key={itemIndex} className="roadmap-card">
+                        <div className="card-bullet">✓</div>
+                        <div className="card-text">{item}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {sectionIndex < roadmap.sections.length - 1 && (
+                    <div className="section-connector"></div>
+                  )}
+                </div>
+              )) : (
+                <div className="roadmap-fallback">
+                  <div className="fallback-content">
+                    <h3>📝 Raw Content</h3>
+                    <pre style={{ whiteSpace: 'pre-wrap', background: '#f5f5f5', padding: '20px', borderRadius: '8px' }}>
+                      {roadmap.content}
+                    </pre>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 

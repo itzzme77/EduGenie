@@ -1,6 +1,10 @@
 // Gemini AI Service
-const GEMINI_API_KEY = process.env.REACT_APP_GEMINI_API_KEY || 'AIzaSyCd0SEspsYq9Ysv9ZAEmSLBk1luNBTfRYI';
-const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`;
+const GEMINI_API_KEY = process.env.REACT_APP_GEMINI_API_KEY; // Removed insecure hardcoded fallback
+if (!GEMINI_API_KEY) {
+  console.warn('REACT_APP_GEMINI_API_KEY is not set. Add it to a .env file (not committed).');
+}
+const GEMINI_MODEL = process.env.REACT_APP_GEMINI_MODEL || 'gemini-2.5-flash';
+const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 // Function to list available models
 export async function listAvailableModels() {
@@ -43,66 +47,83 @@ export async function listAvailableModels() {
 
 export async function sendMessageToGemini(message, conversationHistory = []) {
   try {
-    // Build a simple prompt with context
-    let prompt = message;
-    
-    // Add recent conversation context (last 5 messages)
-    if (conversationHistory.length > 0) {
-      const recentHistory = conversationHistory.slice(-5);
-      const context = recentHistory
-        .map(msg => `${msg.type === 'user' ? 'User' : 'Assistant'}: ${msg.text}`)
-        .join('\n');
-      prompt = `Previous conversation:\n${context}\n\nUser: ${message}\n\nAssistant:`;
+    const cleanedMessage = (message || '').toString().trim();
+    if (!cleanedMessage) throw new Error('Empty message provided.');
+
+    const systemInstruction = 'You are EduGenie AI Assistant. Provide concise, structured, actionable educational help. Use bullet lists for multi-item responses. Clarify ambiguities by asking for missing info before giving a generic answer.';
+
+    // Build contents with proper roles
+    const contents = [];
+    if (conversationHistory && conversationHistory.length) {
+      conversationHistory.slice(-6).forEach(entry => {
+        contents.push({
+          role: entry.role === 'model' ? 'model' : 'user',
+          parts: [{ text: (entry.text || '').toString().slice(0, 4000) }]
+        });
+      });
     }
+    contents.push({ role: 'user', parts: [{ text: `${systemInstruction}\n${cleanedMessage}` }] });
 
     const requestBody = {
-      contents: [{
-        parts: [{
-          text: `You are an AI Learning Assistant for EduGenie, an educational platform. Help students with course recommendations, study tips, career guidance, and educational questions. Be friendly, concise, and encouraging.\n\n${prompt}`
-        }]
-      }],
+      contents,
       generationConfig: {
-        temperature: 0.7,
-        topK: 40,
-        topP: 0.95,
-        maxOutputTokens: 800,
+        temperature: 0.65,
+        topP: 0.9,
+        maxOutputTokens: 850
       }
     };
 
     const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(requestBody)
     });
 
     const data = await response.json();
-    
+    console.log('Gemini raw response:', data); // debug visibility
+
     if (!response.ok) {
-      console.error('Gemini API Error:', data);
-      throw new Error(data.error?.message || `API Error: ${response.status}`);
+      const apiMessage = data.error?.message || `HTTP ${response.status}`;
+      if (/API_KEY|permission/i.test(apiMessage)) {
+        throw new Error('Gemini API key invalid or unauthorized. Update REACT_APP_GEMINI_API_KEY.');
+      }
+      if (/quota|exceeded|RESOURCE_EXHAUSTED/i.test(apiMessage)) {
+        throw new Error('Gemini quota exceeded or rate limited. Retry later or lower frequency.');
+      }
+      throw new Error(apiMessage);
     }
-    
-    if (data.candidates && data.candidates.length > 0 && data.candidates[0].content) {
-      const aiResponse = data.candidates[0].content.parts[0].text;
-      return aiResponse;
-    } else {
-      throw new Error('No response generated from AI');
+
+    if (data.promptFeedback?.blockReason) {
+      return `Blocked (${data.promptFeedback.blockReason}). Rephrase to be educational and neutral.`;
     }
-  } catch (error) {
-    console.error('Gemini API Error:', error);
-    
-    // Return a more specific error message
-    if (error.message.includes('API_KEY_INVALID')) {
-      throw new Error('Invalid API key. Please check your Gemini API configuration.');
-    } else if (error.message.includes('QUOTA_EXCEEDED')) {
-      throw new Error('API quota exceeded. Please try again later.');
-    } else if (error.message.includes('Failed to fetch')) {
-      throw new Error('Network error. Please check your internet connection.');
+
+    // Robust extraction of text parts
+    let collected = [];
+    if (Array.isArray(data.candidates)) {
+      data.candidates.forEach(c => {
+        const parts = c?.content?.parts;
+        if (Array.isArray(parts)) {
+          parts.forEach(p => {
+            if (p && typeof p.text === 'string' && p.text.trim()) {
+              collected.push(p.text.trim());
+            }
+          });
+        }
+      });
     }
-    
-    throw error;
+
+    const finalText = collected.join('\n').trim();
+    if (!finalText) {
+      throw new Error('Empty AI response received.');
+    }
+    return finalText;
+  } catch (err) {
+    console.error('Gemini API Error:', err);
+    const msg = err.message || 'Unknown error';
+    if (/network|Failed to fetch/i.test(msg)) {
+      throw new Error('Network error. Check connection.');
+    }
+    throw err;
   }
 }
 
